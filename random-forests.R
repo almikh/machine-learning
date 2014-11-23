@@ -17,6 +17,8 @@ transformNames <- function (sampling) {
   sampling$Title <- sub(' ', '', sampling$Title)
   sampling$Title <- factor(sampling$Title)
   
+  table(sampling$Title)
+  
   sampling$Title[sampling$Title %in% c('Mme', 'Mlle')] <- 'Mlle'
   sampling$Title[sampling$Title %in% c('Capt', 'Don', 'Major', 'Sir')] <- 'Sir'
   sampling$Title[sampling$Title %in% c('Dona', 'Lady', 'the Countess', 'Jonkheer')] <- 'Lady'
@@ -26,7 +28,7 @@ transformNames <- function (sampling) {
 }
  
 checkFamily <- function(sampling) {
-  sampling$Family <- sampling$SibSp + sampling$Parch + 1
+  sampling$FamilySize <- sampling$SibSp + sampling$Parch + 1
   
   sampling$isMother <- 0
   for(i in 1:nrow(sampling)) {
@@ -38,17 +40,38 @@ checkFamily <- function(sampling) {
   return (sampling)
 }
 
+checkFamilyID <- function(sampling) {
+  extractFunc <- function (x) { strsplit(x, split='[,.]')[[1]][1] }
+  
+  sampling$Surname <- sapply(sampling$Name, FUN=extractFunc)
+  sampling$FamilyID <- paste(as.character(sampling$FamilySize), sampling$Surname, sep="")
+  sampling$FamilyID[sampling$FamilySize <= 2] <- 'Small'
+  
+  famIDs <- data.frame(table(sampling$FamilyID))
+  famIDs <- famIDs[famIDs$Freq <= 2, ]
+  
+  sampling$FamilyID[sampling$FamilyID %in% famIDs$Var1] <- 'Small'
+  sampling$FamilyID <- factor(sampling$FamilyID)
+  
+  return (sampling)
+}
+
+
 # transform 'Name' in Mr, Sir, Mrs and etc.
 union <- transformNames(union)
 
-# add field 'isMother'
+# add field 'isMother' and 'FamilySize'
 union <- checkFamily(union)
+
+# add filed FamilyID
+union <- checkFamilyID(union)
 
 summary(union$Age)
 
 interpolateAge <- function(sampling) {
   ageData <- sampling[!is.na(sampling$Age), ]
-  ageTree <- rpart(Age ~ Pclass + Sex + SibSp + Parch + Fare + Title + Family, data=ageData, method="anova")
+  ageVars <- Age ~ Pclass + Sex + SibSp + Parch + Fare + Embarked + Title + FamilySize
+  ageTree <- rpart(ageVars, data=ageData, method="anova")
   sampling$Age[is.na(sampling$Age)] <- predict(ageTree, sampling[is.na(sampling$Age),])
   return (sampling)
 }
@@ -70,7 +93,7 @@ test <- union[892:1309, ]
 # random forests (first variant)
 set.seed(415)
  
-vars <- as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Title + isMother + Family
+vars <- as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Title + isMother + FamilySize
 forest <- randomForest(vars, data=train, importance=TRUE, ntree=2000)
 varImpPlot(forest)
  
@@ -81,7 +104,7 @@ write.csv(submit, file = "simple-forest.csv", row.names = FALSE)
 # random forests (second variant)
 set.seed(415)
 
-vars <- as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Title + isMother + Family
+vars <- as.factor(Survived) ~ Pclass + Sex + Age + SibSp + Parch + Fare + Title + isMother + Embarked + FamilySize + FamilyID
 ci.forest <- cforest(vars, data = train, controls=cforest_unbiased(ntree=2000, mtry=3))
 
 prediction <- predict(ci.forest, test, OOB=TRUE, type = "response")
